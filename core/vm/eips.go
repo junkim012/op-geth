@@ -28,6 +28,7 @@ var activators = map[int]func(*JumpTable){
 	3855: enable3855,
 	3529: enable3529,
 	3198: enable3198,
+	3074: enable3074,
 	2929: enable2929,
 	2200: enable2200,
 	1884: enable1884,
@@ -190,5 +191,32 @@ func enable3855(jt *JumpTable) {
 // opPush0 implements the PUSH0 opcode
 func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	scope.Stack.push(new(uint256.Int))
+	return nil, nil
+}
+
+// enable3074 applies EIP-3074 (AUTH and AUTHCALL opcode)
+func enable3074(jt *JumpTable) {
+	// New opcode
+	jt[AUTH] = &operation{
+		execute:     opAuth,
+		constantGas: params.AuthGasEIP3074,
+		minStack:    minStack(4, 1),
+		maxStack:    maxStack(4, 1),
+	}
+	jt[AUTHCALL] = &operation{
+		execute:     opAuthCall,
+		constantGas: GasQuickStep,
+		minStack:    minStack(0, 1),
+		maxStack:    maxStack(0, 1),
+	}
+}
+
+// opAuth implements the AUTH opcode
+func opAuth(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	return nil, nil
+}
+
+// opAuthcall implements the AUTHCALL opcode
+func opAuthCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	return nil, nil
 }

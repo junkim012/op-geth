@@ -215,6 +215,8 @@ const (
 	RETURN       OpCode = 0xf3
 	DELEGATECALL OpCode = 0xf4
 	CREATE2      OpCode = 0xf5
+	AUTH         OpCode = 0xf6
+	AUTHCALL     OpCode = 0xf7
 
 	STATICCALL   OpCode = 0xfa
 	REVERT       OpCode = 0xfd
