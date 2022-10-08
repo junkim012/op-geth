@@ -20,6 +20,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
@@ -213,12 +216,81 @@ func enable3074(jt *JumpTable) {
 	}
 }
 
-// opAuth implements the AUTH opcode
 func opAuth(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	stack := scope.Stack
+	commit, v, r, s := stack.pop(), stack.pop(), stack.pop(), stack.pop()
+
+	// Zero out the current authorized account. Only update it if an address
+	// is successfully recovered from the signature.
+	scope.Authorized = nil
+
+	if v.BitLen() < 8 && crypto.ValidateSignatureValues(byte(v.Uint64()), r.ToBig(), s.ToBig(), true) {
+		msg := make([]byte, 65)
+
+		// EIP-3074 messages are of the form
+		// keccak256(type ++ invoker ++ commit)
+		msg[0] = 0x03
+		copy(msg[13:33], scope.Contract.Address().Bytes())
+		commit.WriteToSlice(msg[33:65])
+		hash := crypto.Keccak256(msg)
+
+		sig := make([]byte, 65)
+		r.WriteToSlice(sig[0:32])
+		s.WriteToSlice(sig[32:64])
+		sig[64] = byte(v.Uint64())
+
+		pub, err := crypto.Ecrecover(hash[:], sig)
+
+		if err == nil {
+			var addr common.Address
+			copy(addr[:], crypto.Keccak256(pub[1:])[12:])
+			scope.Authorized = &addr
+		}
+	}
+
+	// reuse commit to push the result
+	temp := commit
+	if scope.Authorized != nil {
+		temp.SetBytes20(scope.Authorized.Bytes())
+	} else {
+		temp.Clear()
+	}
+
+	stack.push(&temp)
 	return nil, nil
 }
 
-// opAuthcall implements the AUTHCALL opcode
 func opAuthCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	return nil, nil
+	// If no authorized account is set, revert.
+	if scope.Authorized == nil {
+		return nil, ErrNoAuthorizedAccount
+	}
+
+	stack := scope.Stack
+	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
+	// We can use this as a temporary value
+	temp := stack.pop()
+	gas := interpreter.evm.callGasTemp
+	// Pop other call parameters.
+	addr, value, extValue, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	toAddr := common.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	ret, returnGas, err := interpreter.evm.AuthCall(scope.Contract, *scope.Authorized, toAddr, args, gas, value.ToBig(), extValue.ToBig())
+
+	if err == ErrInsufficientBalance {
+		return nil, ErrInsufficientBalance
+	} else if err != nil {
+		temp.Clear()
+	} else {
+		temp.SetOne()
+	}
+	stack.push(&temp)
+	if err == nil || err == ErrExecutionReverted {
+		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+	}
+	scope.Contract.Gas += returnGas
+
+	return ret, nil
 }
