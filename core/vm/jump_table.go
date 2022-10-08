@@ -42,6 +42,10 @@ type operation struct {
 
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
+
+	// adding new operations
+	returns bool // determines whether the operations sets the return data content
+
 }
 
 var (
